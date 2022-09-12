@@ -49,14 +49,14 @@ class Operator(util.OperatorBase):
             return pd.to_datetime(timestamp)
 
     def update_daily_consumption_list(self):
-        min_index = np.argmin([float(datapoint['energy_consumption']) for datapoint in self.consumption_same_day])
-        max_index = np.argmax([float(datapoint['energy_consumption']) for datapoint in self.consumption_same_day])
-        day_consumption_max = float(self.consumption_same_day[max_index]['energy_consumption'])
-        day_consumption_min = float(self.consumption_same_day[min_index]['energy_consumption'])
+        min_index = np.argmin([float(datapoint['Energy_Consumption']) for datapoint in self.consumption_same_day])
+        max_index = np.argmax([float(datapoint['Energy_Consumption']) for datapoint in self.consumption_same_day])
+        day_consumption_max = float(self.consumption_same_day[max_index]['Energy_Consumption'])
+        day_consumption_min = float(self.consumption_same_day[min_index]['Energy_Consumption'])
         #day_consumption_max_time = self.todatetime(self.consumption_same_day[max_index]['energy_time']).tz_localize(None)
         #day_consumption_min_time = self.todatetime(self.consumption_same_day[min_index]['energy_time']).tz_localize(None)
         overall_daily_consumption = day_consumption_max-day_consumption_min
-        day = self.consumption_same_day[-1]['energy_time'].tz_localize(None).date()
+        day = self.consumption_same_day[-1]['Energy_Time'].tz_localize(None).date()
         self.daily_consumption_list.append((day, overall_daily_consumption))
         return
 
@@ -85,12 +85,12 @@ class Operator(util.OperatorBase):
     
     def run(self, data, selector='energy_func'):
         if os.getenv("DEBUG") is not None and os.getenv("DEBUG").lower() == "true":
-            print(selector + ": " + 'energy: '+str(data['energy'])+'  '+'time: '+str(self.todatetime(data['energy_time']).tz_localize(None)))
+            print(selector + ": " + 'energy: '+str(data['Energy_Consumption'])+'  '+'time: '+str(self.todatetime(data['Energy_Time']).tz_localize(None)))
         if self.consumption_same_day == []:
             self.consumption_same_day.append(data)
             return
         elif self.consumption_same_day != []:
-            if self.todatetime(data['energy_time']).tz_localize(None).date()==self.todatetime(self.consumption_same_day[-1]['energy_time']).tz_localize(None).date():
+            if self.todatetime(data['Energy_Time']).tz_localize(None).date()==self.todatetime(self.consumption_same_day[-1]['Energy_Time']).tz_localize(None).date():
                 self.consumption_same_day.append(data)
                 return
             else:
