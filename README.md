@@ -1,4 +1,4 @@
-# anomaly-detector
+# Excessive Consumption
 
 ## Config options
 <!---
