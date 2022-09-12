@@ -76,7 +76,7 @@ class Operator(util.OperatorBase):
         return daily_consumption_clustering.labels_
     
     def test_daily_consumption(self, clustering_labels):
-        anomalous_indices = np.where(clustering_labels==clustering_labels.min())
+        anomalous_indices = np.where(clustering_labels==clustering_labels.min())[0]
         median = np.median([daily_consumption for _, daily_consumption in self.daily_consumption_list])
         anomalous_indices_high = [i for i in anomalous_indices if self.daily_consumption_list[i][1] > median]
         if len(self.consumption_same_day)-1 in anomalous_indices:
