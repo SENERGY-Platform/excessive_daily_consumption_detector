@@ -62,7 +62,7 @@ class Operator(util.OperatorBase):
 
     def determine_epsilon(self):
         neighbors = NearestNeighbors(n_neighbors=10)
-        neighbors_fit = neighbors.fit(np.array(self.daily_consumption_list).reshape(-1,1))
+        neighbors_fit = neighbors.fit(np.array([daily_consumption for _, daily_consumption in self.daily_consumption_list]).reshape(-1,1))
         distances, _ = neighbors_fit.kneighbors(np.array(self.daily_consumption_list).reshape(-1,1))
         distances = np.sort(distances, axis=0)
         distances_x = distances[:,1]
