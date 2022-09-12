@@ -95,11 +95,14 @@ class Operator(util.OperatorBase):
                 return
             else:
                 self.update_daily_consumption_list()
-                epsilon = self.determine_epsilon()
-                clustering_labels = self.create_clustering(epsilon)
-                days_with_excessive_consumption = self.test_daily_consumption(clustering_labels)                    
-                self.consumption_same_day = [data]
-                if pd.Timestamp.now().date()-pd.Timedelta(1,'days') in list(chain.from_iterable(days_with_excessive_consumption)):
-                    return {'value': 1} # Excessive daily consumption detected yesterday.
+                if len(self.daily_consumption_list) >= 50:
+                    epsilon = self.determine_epsilon()
+                    clustering_labels = self.create_clustering(epsilon)
+                    days_with_excessive_consumption = self.test_daily_consumption(clustering_labels)                    
+                    self.consumption_same_day = [data]
+                    if pd.Timestamp.now().date()-pd.Timedelta(1,'days') in list(chain.from_iterable(days_with_excessive_consumption)):
+                        return {'value': 1} # Excessive daily consumption detected yesterday.
+                    else:
+                        return {'value': 0} # No excessive daily consumtion yesterday.
                 else:
-                    return {'value': 0} # No excessive daily consumtion yesterday.
+                    return
