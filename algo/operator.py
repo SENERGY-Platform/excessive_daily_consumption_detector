@@ -63,7 +63,7 @@ class Operator(util.OperatorBase):
     def determine_epsilon(self):
         neighbors = NearestNeighbors(n_neighbors=10)
         neighbors_fit = neighbors.fit(np.array([daily_consumption for _, daily_consumption in self.daily_consumption_list]).reshape(-1,1))
-        distances, _ = neighbors_fit.kneighbors(np.array(self.daily_consumption_list).reshape(-1,1))
+        distances, _ = neighbors_fit.kneighbors(np.array([daily_consumption for _, daily_consumption in self.daily_consumption_list]).reshape(-1,1))
         distances = np.sort(distances, axis=0)
         distances_x = distances[:,1]
         kneedle = kneed.KneeLocator(np.linspace(0,1,len(distances_x)), distances_x, S=0.9, curve="convex", direction="increasing")
