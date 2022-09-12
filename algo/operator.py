@@ -94,7 +94,7 @@ class Operator(util.OperatorBase):
                 self.consumption_same_day.append(data)
                 return
             else:
-                self.update_daily_consumption_list(self.consumption_same_day)
+                self.update_daily_consumption_list()
                 epsilon = self.determine_epsilon()
                 clustering_labels = self.create_clustering(epsilon)
                 days_with_excessive_consumption = self.test_daily_consumption(clustering_labels)                    
