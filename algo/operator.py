@@ -56,7 +56,7 @@ class Operator(util.OperatorBase):
         #day_consumption_max_time = self.todatetime(self.consumption_same_day[max_index]['energy_time']).tz_localize(None)
         #day_consumption_min_time = self.todatetime(self.consumption_same_day[min_index]['energy_time']).tz_localize(None)
         overall_daily_consumption = day_consumption_max-day_consumption_min
-        day = self.consumption_same_day[-1]['Energy_Time'].tz_localize(None).date()
+        day = self.todatetime(self.consumption_same_day[-1]['Energy_Time']).tz_localize(None).date()
         self.daily_consumption_list.append((day, overall_daily_consumption))
         return
 
