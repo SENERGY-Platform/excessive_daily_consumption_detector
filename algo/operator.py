@@ -24,6 +24,7 @@ from sklearn.cluster import DBSCAN
 import kneed
 import os
 from itertools import chain
+import pickle
 
 class Operator(util.OperatorBase):
     def __init__(self, device_id, data_path, device_name='das Gerät'):
@@ -37,7 +38,9 @@ class Operator(util.OperatorBase):
 
         self.consumption_same_day = []
 
-        self.model_file_path = f'{data_path}/{self.device_id}_model.pt'
+        self.clustering_file_path = f'{data_path}/{self.device_id}_clustering.pickle'
+        self.epsilon_file_path = f'{data_path}/{self.device_id}_epsilon.pickle'
+        self.daily_consumption_list_file_path = f'{data_path}/{self.device_id}_daily_consumption_list.pickle'
 
     def todatetime(self, timestamp):
         if str(timestamp).isdigit():
@@ -58,6 +61,8 @@ class Operator(util.OperatorBase):
         overall_daily_consumption = day_consumption_max-day_consumption_min
         day = self.todatetime(self.consumption_same_day[-1]['Energy_Time']).tz_localize(None).date()
         self.daily_consumption_list.append((day, overall_daily_consumption))
+        with open(self.daily_consumption_list_file_path, 'wb') as f:
+            pickle.dump(self.daily_consumption_list, f)
         return
 
     def determine_epsilon(self):
@@ -68,11 +73,15 @@ class Operator(util.OperatorBase):
         distances_x = distances[:,1]
         kneedle = kneed.KneeLocator(np.linspace(0,1,len(distances_x)), distances_x, S=0.9, curve="convex", direction="increasing")
         epsilon = kneedle.knee_y
+        with open(self.epsilon_file_path, 'wb') as f:
+            pickle.dump(epsilon, f)
         return epsilon
 
     def create_clustering(self, epsilon):
         daily_consumption_clustering = DBSCAN(eps=epsilon, min_samples=10).fit(np.array([daily_consumption 
                                                                      for _, daily_consumption in self.daily_consumption_list]).reshape(-1,1))
+        with open(self.clustering_file_path, 'wb') as f:
+            pickle.dump(daily_consumption_clustering, f)
         return daily_consumption_clustering.labels_
     
     def test_daily_consumption(self, clustering_labels):
