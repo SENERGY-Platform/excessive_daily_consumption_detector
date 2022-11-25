@@ -93,6 +93,7 @@ class Operator(util.OperatorBase):
         return [self.daily_consumption_list[i] for i in anomalous_indices_high]
     
     def run(self, data, selector='energy_func'):
+        timestamp = self.todatetime(data['energy_time']).tz_localize(None)
         if os.getenv("DEBUG") is not None and os.getenv("DEBUG").lower() == "true":
             print(selector + ": " + 'energy: '+str(data['Energy_Consumption'])+'  '+'time: '+str(self.todatetime(data['Energy_Time']).tz_localize(None)))
         if self.consumption_same_day == []:
@@ -110,8 +111,8 @@ class Operator(util.OperatorBase):
                     clustering_labels = self.create_clustering(epsilon)
                     days_with_excessive_consumption = self.test_daily_consumption(clustering_labels)                    
                     if pd.Timestamp.now().date()-pd.Timedelta(1,'days') in list(chain.from_iterable(days_with_excessive_consumption)):
-                        return {'value': 1} # Excessive daily consumption detected yesterday.
+                        return {'value': f'Nachricht vom {str(timestamp.date())} um {str(timestamp.hour)}:{str(timestamp.minute)} Uhr: Am gestrigen Tag wurde übermäßig viel Energie durch das Gerät verbraucht.'} # Excessive daily consumption detected yesterday.
                     else:
-                        return {'value': 0} # No excessive daily consumtion yesterday.
+                        return  # No excessive daily consumtion yesterday.
                 else:
                     return
