@@ -95,7 +95,7 @@ class Operator(util.OperatorBase):
     def run(self, data, selector='energy_func'):
         timestamp = self.todatetime(data['energy_time']).tz_localize(None)
         if os.getenv("DEBUG") is not None and os.getenv("DEBUG").lower() == "true":
-            print(selector + ": " + 'energy: '+str(data['Energy_Consumption'])+'  '+'time: '+str(self.todatetime(data['Energy_Time']).tz_localize(None)))
+            print('energy: '+str(data['Energy_Consumption'])+'  '+'time: '+str(self.todatetime(data['Energy_Time']).tz_localize(None)))
         if self.consumption_same_day == []:
             self.consumption_same_day.append(data)
             return
