@@ -12,5 +12,5 @@ sklearn
 tqdm
 similaritymeasures
 pyarrow
-sklearn
+scikit-learn
 kneed[plot]
