@@ -93,7 +93,7 @@ class Operator(util.OperatorBase):
         return [self.daily_consumption_list[i] for i in anomalous_indices_high]
     
     def run(self, data, selector='energy_func'):
-        timestamp = self.todatetime(data['Energy_time']).tz_localize(None)
+        timestamp = self.todatetime(data['Energy_Time']).tz_localize(None)
         if os.getenv("DEBUG") is not None and os.getenv("DEBUG").lower() == "true":
             print('energy: '+str(data['Energy_Consumption'])+'  '+'time: '+str(self.todatetime(data['Energy_Time']).tz_localize(None)))
         if self.consumption_same_day == []:
