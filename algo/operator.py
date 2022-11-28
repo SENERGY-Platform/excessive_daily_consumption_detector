@@ -109,7 +109,7 @@ class Operator(util.OperatorBase):
                     epsilon = self.determine_epsilon()
                     clustering_labels = self.create_clustering(epsilon)
                     days_with_excessive_consumption = self.test_daily_consumption(clustering_labels)                    
-                    if pd.Timestamp.now().date()-pd.Timedelta(1,'days') in list(chain.from_iterable(days_with_excessive_consumption)):
+                    if timestamp.date()-pd.Timedelta(1,'days') in list(chain.from_iterable(days_with_excessive_consumption)):
                         return {'value': f'Nachricht vom {str(timestamp.date())} um {str(timestamp.hour)}:{str(timestamp.minute)} Uhr: Am gestrigen Tag wurde übermäßig viel Energie durch das Gerät verbraucht.'} # Excessive daily consumption detected yesterday.
                     else:
                         return  # No excessive daily consumtion yesterday.
