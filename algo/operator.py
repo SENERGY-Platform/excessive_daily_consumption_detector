@@ -88,7 +88,7 @@ class Operator(util.OperatorBase):
         anomalous_indices = np.where(clustering_labels==clustering_labels.min())[0]
         quartile_3 = np.quantile([daily_consumption for _, daily_consumption in self.daily_consumption_list],0.75)
         anomalous_indices_high = [i for i in anomalous_indices if self.daily_consumption_list[i][1] > quartile_3]
-        if len(self.consumption_same_day)-1 in anomalous_indices:
+        if len(self.daily_consumption_list)-1 in anomalous_indices:
             print(f'Gestern wurde durch {self.device_name} ungewöhnlich viel Strom verbraucht.')
         return [self.daily_consumption_list[i] for i in anomalous_indices_high]
     
@@ -104,14 +104,15 @@ class Operator(util.OperatorBase):
                 return
             else:
                 self.update_daily_consumption_list()
-                self.consumption_same_day = [data]
                 if len(self.daily_consumption_list) >= 24:
                     epsilon = self.determine_epsilon()
                     clustering_labels = self.create_clustering(epsilon)
-                    days_with_excessive_consumption = self.test_daily_consumption(clustering_labels)                    
+                    days_with_excessive_consumption = self.test_daily_consumption(clustering_labels)
+                    self.consumption_same_day = [data]                   
                     if timestamp.date()-pd.Timedelta(1,'days') in list(chain.from_iterable(days_with_excessive_consumption)):
                         return {'value': f'Nachricht vom {str(timestamp.date())} um {str(timestamp.hour)}:{str(timestamp.minute)} Uhr: Am gestrigen Tag wurde übermäßig viel Energie durch das Gerät verbraucht.'} # Excessive daily consumption detected yesterday.
                     else:
                         return  # No excessive daily consumtion yesterday.
                 else:
+                    self.consumption_same_day = [data]
                     return
