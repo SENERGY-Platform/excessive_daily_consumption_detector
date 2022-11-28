@@ -105,7 +105,7 @@ class Operator(util.OperatorBase):
             else:
                 self.update_daily_consumption_list()
                 self.consumption_same_day = [data]
-                if len(self.daily_consumption_list) >= 50:
+                if len(self.daily_consumption_list) >= 24:
                     epsilon = self.determine_epsilon()
                     clustering_labels = self.create_clustering(epsilon)
                     days_with_excessive_consumption = self.test_daily_consumption(clustering_labels)                    
