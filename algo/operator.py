@@ -111,7 +111,7 @@ class Operator(util.OperatorBase):
                     days_with_excessive_consumption = self.test_daily_consumption(clustering_labels)
                     self.consumption_same_day = [data]                   
                     if timestamp.date()-pd.Timedelta(1,'days') in list(chain.from_iterable(days_with_excessive_consumption)):
-                        return {'value': f'Nachricht von {timestamp_rounded_to_minute}: Am gestrigen Tag wurde übermäßig viel Energie durch das Gerät verbraucht.'} # Excessive daily consumption detected yesterday.
+                        return {'value': f'Am gestrigen Tag wurde übermäßig verbraucht.'} # Excessive daily consumption detected yesterday.
                     else:
                         return  # No excessive daily consumtion yesterday.
                 else:
