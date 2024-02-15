@@ -44,9 +44,9 @@ class Operator(OperatorBase):
 
         self.consumption_same_day = []
 
-        self.clustering_file_path = f'{data_path}/{self.device_id}_clustering.pickle'
-        self.epsilon_file_path = f'{data_path}/{self.device_id}_epsilon.pickle'
-        self.daily_consumption_list_file_path = f'{data_path}/{self.device_id}_daily_consumption_list.pickle'
+        self.clustering_file_path = f'{data_path}/clustering.pickle'
+        self.epsilon_file_path = f'{data_path}/epsilon.pickle'
+        self.daily_consumption_list_file_path = f'{data_path}/daily_consumption_list.pickle'
 
     def todatetime(self, timestamp):
         if str(timestamp).isdigit():
