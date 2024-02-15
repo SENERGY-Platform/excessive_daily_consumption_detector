@@ -14,57 +14,116 @@
    limitations under the License.
 """
 
-import util
-import algo
-import json
-import confluent_kafka
-import mf_lib
-import cncr_wdg
-import signal
+__all__ = ("Operator", )
 
-if __name__ == '__main__':
-    util.print_init(name="anomaly-detector-operator", git_info_file="git_commit")
-    dep_config = util.DeploymentConfig()
-    opr_config = util.OperatorConfig(json.loads(dep_config.config))
-    util.init_logger(opr_config.config.logger_level)
-    util.logger.debug(f"deployment config: {dep_config}")
-    util.logger.debug(f"operator config: {opr_config}")
-    filter_handler = mf_lib.FilterHandler()
-    for it in opr_config.inputTopics:
-        filter_handler.add_filter(util.gen_filter(input_topic=it, selectors=opr_config.config.selectors, pipeline_id=dep_config.pipeline_id))
-    kafka_brokers = ",".join(util.get_kafka_brokers(zk_hosts=dep_config.zk_quorum, zk_path=dep_config.zk_brokers_path))
-    kafka_consumer_config = {
-        "metadata.broker.list": kafka_brokers,
-        "group.id": dep_config.config_application_id,
-        "auto.offset.reset": dep_config.consumer_auto_offset_reset_config,
-        "max.poll.interval.ms": 6000000
-    }
-    kafka_producer_config = {
-        "metadata.broker.list": kafka_brokers,
-    }
-    util.logger.debug(f"kafka consumer config: {kafka_consumer_config}")
-    util.logger.debug(f"kafka producer config: {kafka_producer_config}")
-    kafka_consumer = confluent_kafka.Consumer(kafka_consumer_config, logger=util.logger)
-    kafka_producer = confluent_kafka.Producer(kafka_producer_config, logger=util.logger)
-    operator = algo.Operator(
-        device_id=opr_config.config.device_id,
-        data_path=opr_config.config.data_path
-    )
-    operator.init(
-        kafka_consumer=kafka_consumer,
-        kafka_producer=kafka_producer,
-        filter_handler=filter_handler,
-        output_topic=dep_config.output,
-        pipeline_id=dep_config.pipeline_id,
-        operator_id=dep_config.operator_id
-    )
-    watchdog = cncr_wdg.Watchdog(
-        monitor_callables=[operator.is_alive],
-        shutdown_callables=[operator.stop],
-        join_callables=[kafka_consumer.close, kafka_producer.flush],
-        shutdown_signals=[signal.SIGTERM, signal.SIGINT, signal.SIGABRT],
-        logger=util.logger
-    )
-    watchdog.start(delay=5)
-    operator.start()
-    watchdog.join()
+from operator_lib.util import OperatorBase
+import pandas as pd
+import numpy as np
+from sklearn.neighbors import NearestNeighbors
+from sklearn.cluster import DBSCAN
+import kneed
+import os
+from itertools import chain
+import pickle
+
+from operator_lib.util import Config
+class CustomConfig(Config):
+    data_path = "/opt/data"
+
+class Operator(OperatorBase):
+    configType = CustomConfig
+    
+    def init(self, *args, **kwargs):
+        super().init(*args, **kwargs)
+        data_path = self.config.data_path
+        
+        if not os.path.exists(data_path):
+            os.mkdir(data_path)
+
+        self.daily_consumption_list = []
+
+        self.consumption_same_day = []
+
+        self.clustering_file_path = f'{data_path}/{self.device_id}_clustering.pickle'
+        self.epsilon_file_path = f'{data_path}/{self.device_id}_epsilon.pickle'
+        self.daily_consumption_list_file_path = f'{data_path}/{self.device_id}_daily_consumption_list.pickle'
+
+    def todatetime(self, timestamp):
+        if str(timestamp).isdigit():
+            if len(str(timestamp))==13:
+                return pd.to_datetime(int(timestamp), unit='ms')
+            elif len(str(timestamp))==19:
+                return pd.to_datetime(int(timestamp), unit='ns')
+        else:
+            return pd.to_datetime(timestamp)
+
+    def update_daily_consumption_list(self):
+        min_index = np.argmin([float(datapoint['Energy_Consumption']) for datapoint in self.consumption_same_day])
+        max_index = np.argmax([float(datapoint['Energy_Consumption']) for datapoint in self.consumption_same_day])
+        day_consumption_max = float(self.consumption_same_day[max_index]['Energy_Consumption'])
+        day_consumption_min = float(self.consumption_same_day[min_index]['Energy_Consumption'])
+        #day_consumption_max_time = self.todatetime(self.consumption_same_day[max_index]['energy_time']).tz_localize(None)
+        #day_consumption_min_time = self.todatetime(self.consumption_same_day[min_index]['energy_time']).tz_localize(None)
+        overall_daily_consumption = day_consumption_max-day_consumption_min
+        day = self.todatetime(self.consumption_same_day[-1]['Energy_Time']).tz_localize(None).date()
+        self.daily_consumption_list.append((day, overall_daily_consumption))
+        with open(self.daily_consumption_list_file_path, 'wb') as f:
+            pickle.dump(self.daily_consumption_list, f)
+        return
+
+    def determine_epsilon(self):
+        neighbors = NearestNeighbors(n_neighbors=10)
+        neighbors_fit = neighbors.fit(np.array([daily_consumption for _, daily_consumption in self.daily_consumption_list]).reshape(-1,1))
+        distances, _ = neighbors_fit.kneighbors(np.array([daily_consumption for _, daily_consumption in self.daily_consumption_list]).reshape(-1,1))
+        distances = np.sort(distances, axis=0)
+        distances_x = distances[:,1]
+        kneedle = kneed.KneeLocator(np.linspace(0,1,len(distances_x)), distances_x, S=0.9, curve="convex", direction="increasing")
+        epsilon = kneedle.knee_y
+        with open(self.epsilon_file_path, 'wb') as f:
+            pickle.dump(epsilon, f)
+        return epsilon
+
+    def create_clustering(self, epsilon):
+        daily_consumption_clustering = DBSCAN(eps=epsilon, min_samples=10).fit(np.array([daily_consumption 
+                                                                     for _, daily_consumption in self.daily_consumption_list]).reshape(-1,1))
+        with open(self.clustering_file_path, 'wb') as f:
+            pickle.dump(daily_consumption_clustering, f)
+        return daily_consumption_clustering.labels_
+    
+    def test_daily_consumption(self, clustering_labels):
+        anomalous_indices = np.where(clustering_labels==clustering_labels.min())[0]
+        quantile = np.quantile([daily_consumption for _, daily_consumption in self.daily_consumption_list],0.95)
+        anomalous_indices_high = [i for i in anomalous_indices if self.daily_consumption_list[i][1] > quantile]
+        if len(self.daily_consumption_list)-1 in anomalous_indices:
+            print(f'Gestern wurde durch {self.device_name} ungewöhnlich viel Strom verbraucht.')
+        return [self.daily_consumption_list[i] for i in anomalous_indices_high]
+    
+    def run(self, data, selector='energy_func'):
+        timestamp = self.todatetime(data['Energy_Time']).tz_localize(None)
+        timestamp_rounded_to_minute = timestamp.floor('min')
+        print('energy: '+str(data['Energy_Consumption'])+'  '+'time: '+str(timestamp))
+        if self.consumption_same_day == []:
+            self.consumption_same_day.append(data)
+            return
+        elif self.consumption_same_day != []:
+            if self.todatetime(data['Energy_Time']).tz_localize(None).date()==self.todatetime(self.consumption_same_day[-1]['Energy_Time']).tz_localize(None).date():
+                self.consumption_same_day.append(data)
+                return
+            else:
+                self.update_daily_consumption_list()
+                if len(self.daily_consumption_list) >= 24:
+                    epsilon = self.determine_epsilon()
+                    clustering_labels = self.create_clustering(epsilon)
+                    days_with_excessive_consumption = self.test_daily_consumption(clustering_labels)
+                    self.consumption_same_day = [data]                   
+                    if timestamp.date()-pd.Timedelta(1,'days') in list(chain.from_iterable(days_with_excessive_consumption)):
+                        return {'value': f'Am gestrigen Tag wurde übermäßig verbraucht.'} # Excessive daily consumption detected yesterday.
+                    else:
+                        return  # No excessive daily consumtion yesterday.
+                else:
+                    self.consumption_same_day = [data]
+                    return
+                
+from operator_lib.operator_lib import OperatorLib
+if __name__ == "__main__":
+    OperatorLib(Operator(), name="leakage-detection-operator", git_info_file='git_commit')
