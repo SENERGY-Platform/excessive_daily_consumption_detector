@@ -98,7 +98,7 @@ class Operator(OperatorBase):
             print(f'Gestern wurde durch {self.device_name} ungewöhnlich viel Strom verbraucht.')
         return [self.daily_consumption_list[i] for i in anomalous_indices_high]
     
-    def run(self, data, selector='energy_func'):
+    def run(self, data, selector='energy_func', topic=''):
         timestamp = self.todatetime(data['Energy_Time']).tz_localize(None)
         timestamp_rounded_to_minute = timestamp.floor('min')
         print('energy: '+str(data['Energy_Consumption'])+'  '+'time: '+str(timestamp))
