@@ -32,6 +32,7 @@ import datetime
 from operator_lib.util import Config
 class CustomConfig(Config):
     data_path = "/opt/data"
+    device_name: str = ''
 
 class Operator(OperatorBase):
     configType = CustomConfig
@@ -39,6 +40,7 @@ class Operator(OperatorBase):
     def init(self, *args, **kwargs):
         super().init(*args, **kwargs)
         data_path = self.config.data_path
+        self.device_name = self.config.device_name
         
         if not os.path.exists(data_path):
             os.mkdir(data_path)
