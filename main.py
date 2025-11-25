@@ -26,6 +26,9 @@ import os
 from itertools import chain
 import pickle
 
+import typing
+import datetime
+
 from operator_lib.util import Config
 class CustomConfig(Config):
     data_path = "/opt/data"
@@ -65,7 +68,7 @@ class Operator(OperatorBase):
         #day_consumption_max_time = self.todatetime(self.consumption_same_day[max_index]['energy_time']).tz_localize(None)
         #day_consumption_min_time = self.todatetime(self.consumption_same_day[min_index]['energy_time']).tz_localize(None)
         overall_daily_consumption = day_consumption_max-day_consumption_min
-        day = self.todatetime(self.consumption_same_day[-1]['Energy_Time']).tz_localize(None).date()
+        day = self.consumption_same_day[-1]['Energy_Time'].date()
         self.daily_consumption_list.append((day, overall_daily_consumption))
         with open(self.daily_consumption_list_file_path, 'wb') as f:
             pickle.dump(self.daily_consumption_list, f)
@@ -98,15 +101,17 @@ class Operator(OperatorBase):
             print(f'Gestern wurde durch {self.device_name} ungewöhnlich viel Strom verbraucht.')
         return [self.daily_consumption_list[i] for i in anomalous_indices_high]
     
-    def run(self, data, selector='energy_func', topic=''):
-        timestamp = self.todatetime(data['Energy_Time']).tz_localize(None)
+    def run(self, data: typing.Dict[str, typing.Any], selector: str, device_id, timestamp: datetime.datetime):
+        # Convert to german time and then forget the timezone.
+        timestamp = pd.Timestamp(timestamp).tz_localize("Zulu").tz_convert("Europe/Berlin").tz_localize(None)
+        data = {'Energy_Consumption': data['Energy_Consumption'], 'Energy_Time': timestamp}
         timestamp_rounded_to_minute = timestamp.floor('min')
         print('energy: '+str(data['Energy_Consumption'])+'  '+'time: '+str(timestamp))
         if self.consumption_same_day == []:
             self.consumption_same_day.append(data)
             return
         elif self.consumption_same_day != []:
-            if self.todatetime(data['Energy_Time']).tz_localize(None).date()==self.todatetime(self.consumption_same_day[-1]['Energy_Time']).tz_localize(None).date():
+            if data['Energy_Time'].date()==self.consumption_same_day[-1]['Energy_Time'].date():
                 self.consumption_same_day.append(data)
                 return
             else:
