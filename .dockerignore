@@ -1,0 +1,7 @@
+# actions/checkout stores the job's GITHUB_TOKEN in .git/config; COPY . . would bake it into a
+# public image layer. The rest of .git stays: the build records the commit from it.
+.git/config
+.env
+.venv
+**/__pycache__
+data
