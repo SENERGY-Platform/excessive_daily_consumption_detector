@@ -1,0 +1,24 @@
+{
+  "inputs": [
+    {
+      "name": "Energy_Consumption",
+      "type": "float"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "value",
+      "type": "string"
+    }
+  ],
+  "config_values": [
+    {
+      "name": "device_name",
+      "type": "string"
+    },
+    {
+      "name": "logger_level",
+      "type": "string"
+    }
+  ]
+}

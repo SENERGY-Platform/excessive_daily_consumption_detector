@@ -29,17 +29,29 @@ import pickle
 import typing
 import datetime
 
-from operator_lib.util import Config
+from operator_lib.util import Config, Inputs, Outputs
 class CustomConfig(Config):
-    data_path = "/opt/data"
     device_name: str = ''
+    # A field of the library, declared again so that flows can set it.
+    logger_level: str = "warning"
+
+# The time of a reading is the time of its Kafka message, so there is no input for it.
+class ConsumptionInputs(Inputs):
+    Energy_Consumption: float
+
+class ConsumptionOutputs(Outputs):
+    value: str
 
 class Operator(OperatorBase):
     configType = CustomConfig
+    inputs = ConsumptionInputs
+    outputs = ConsumptionOutputs
+    # Where the state is kept, the volume of the deployment; not a config value, which a flow could change.
+    data_path = "/opt/data"
     
     def init(self, *args, **kwargs):
         super().init(*args, **kwargs)
-        data_path = self.config.data_path
+        data_path = self.data_path
         self.device_name = self.config.device_name
         
         if not os.path.exists(data_path):
