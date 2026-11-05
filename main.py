@@ -17,19 +17,28 @@
 __all__ = ("Operator", )
 
 from operator_lib.util import OperatorBase, logger
+from operator_lib.util.config import MissingConfigValueError
+from operator_lib.util.helpers import provide_historic_frames_local, HistoryNeedsRayError
 import pandas as pd
 import numpy as np
 from sklearn.neighbors import NearestNeighbors
 from sklearn.cluster import DBSCAN
 import kneed
-import os
-from itertools import chain
-import pickle
 
 import typing
 import datetime
 
 from operator_lib.util import Config, Inputs, Outputs
+
+# The days are those of German time.
+TIMEZONE = 'Europe/Berlin'
+# A day is compared with the days of this length up to it. As much history is read at every start, and older days
+# are dropped, so that a running operator compares with the same days as one just started.
+HISTORY_LENGTH = pd.Timedelta(90, 'd')
+# The days needed before a day is judged.
+MIN_DAYS = 24
+
+
 class CustomConfig(Config):
     device_name: str = ''
     # A field of the library, declared again so that flows can set it.
@@ -46,47 +55,60 @@ class Operator(OperatorBase):
     configType = CustomConfig
     inputs = ConsumptionInputs
     outputs = ConsumptionOutputs
-    # Where the state is kept, the volume of the deployment; not a config value, which a flow could change.
-    data_path = "/opt/data"
-    
+
     def init(self, *args, **kwargs):
         super().init(*args, **kwargs)
-        data_path = self.data_path
         self.device_name = self.config.device_name
-        
-        if not os.path.exists(data_path):
-            os.mkdir(data_path)
 
+        # (day, consumption) per completed day, oldest first, and the readings of the day in progress. Like everything
+        # derived from the readings not kept: rebuilt from the history at every start.
         self.daily_consumption_list = []
-
         self.consumption_same_day = []
+        # The day of the first reading, which is not recorded: its readings begin during it.
+        self.incomplete_day = None
+        for at, reading in self.read_history():
+            self.add_reading(at, reading)
 
-        self.clustering_file_path = f'{data_path}/clustering.pickle'
-        self.epsilon_file_path = f'{data_path}/epsilon.pickle'
-        self.daily_consumption_list_file_path = f'{data_path}/daily_consumption_list.pickle'
+    def read_history(self):
+        # Timescale is the only source of the history: it is read at every start and extended live, so a restart or a
+        # new volume loses nothing. Any other failure of the read fails the start, and the platform starts it again.
+        try:
+            frames = provide_historic_frames_local(HISTORY_LENGTH)
+        except (HistoryNeedsRayError, MissingConfigValueError) as e:
+            logger.warning(f'Starting without history: {e}')
+            return []
+        if len(frames) != 1 or 'device_id' in frames[0].columns:
+            logger.warning('Starting without history: the consumption comes from more than one input or device')
+            return []
+        # As live: German time without a timezone, and without missing values.
+        frame = frames[0].dropna(subset=['Energy_Consumption']).sort_values('time', kind='stable')
+        times = pd.DatetimeIndex(pd.to_datetime(frame['time'], utc=True)).tz_convert(TIMEZONE).tz_localize(None)
+        return zip(times, frame['Energy_Consumption'].astype(float))
 
-    def todatetime(self, timestamp):
-        if str(timestamp).isdigit():
-            if len(str(timestamp))==13:
-                return pd.to_datetime(int(timestamp), unit='ms')
-            elif len(str(timestamp))==19:
-                return pd.to_datetime(int(timestamp), unit='ns')
-        else:
-            return pd.to_datetime(timestamp)
+    def add_reading(self, at, reading):
+        # Adds the meter reading at `at`, German time without a timezone, and returns the day it completes, if one is
+        # recorded.
+        if not self.consumption_same_day:
+            self.incomplete_day = at.date()
+        elif at <= self.consumption_same_day[-1]['Energy_Time']:
+            # A repeated or late reading, as Kafka delivers after a restart what the history holds already.
+            return None
+        completed = None
+        if self.consumption_same_day and at.date() != self.consumption_same_day[-1]['Energy_Time'].date():
+            completed = self.update_daily_consumption_list()
+            self.consumption_same_day = []
+        self.consumption_same_day.append({'Energy_Consumption': reading, 'Energy_Time': at})
+        return completed
 
     def update_daily_consumption_list(self):
-        min_index = np.argmin([float(datapoint['Energy_Consumption']) for datapoint in self.consumption_same_day])
-        max_index = np.argmax([float(datapoint['Energy_Consumption']) for datapoint in self.consumption_same_day])
-        day_consumption_max = float(self.consumption_same_day[max_index]['Energy_Consumption'])
-        day_consumption_min = float(self.consumption_same_day[min_index]['Energy_Consumption'])
-        #day_consumption_max_time = self.todatetime(self.consumption_same_day[max_index]['energy_time']).tz_localize(None)
-        #day_consumption_min_time = self.todatetime(self.consumption_same_day[min_index]['energy_time']).tz_localize(None)
-        overall_daily_consumption = day_consumption_max-day_consumption_min
+        readings = [datapoint['Energy_Consumption'] for datapoint in self.consumption_same_day]
         day = self.consumption_same_day[-1]['Energy_Time'].date()
-        self.daily_consumption_list.append((day, overall_daily_consumption))
-        with open(self.daily_consumption_list_file_path, 'wb') as f:
-            pickle.dump(self.daily_consumption_list, f)
-        return
+        if day == self.incomplete_day:
+            return None
+        self.daily_consumption_list.append((day, max(readings)-min(readings)))
+        while day - self.daily_consumption_list[0][0] >= HISTORY_LENGTH:
+            self.daily_consumption_list.pop(0)
+        return day
 
     def determine_epsilon(self):
         neighbors = NearestNeighbors(n_neighbors=10)
@@ -96,17 +118,13 @@ class Operator(OperatorBase):
         distances_x = distances[:,1]
         kneedle = kneed.KneeLocator(np.linspace(0,1,len(distances_x)), distances_x, S=0.9, curve="convex", direction="increasing")
         epsilon = kneedle.knee_y
-        with open(self.epsilon_file_path, 'wb') as f:
-            pickle.dump(epsilon, f)
         return epsilon
 
     def create_clustering(self, epsilon):
-        daily_consumption_clustering = DBSCAN(eps=epsilon, min_samples=10).fit(np.array([daily_consumption 
+        daily_consumption_clustering = DBSCAN(eps=epsilon, min_samples=10).fit(np.array([daily_consumption
                                                                      for _, daily_consumption in self.daily_consumption_list]).reshape(-1,1))
-        with open(self.clustering_file_path, 'wb') as f:
-            pickle.dump(daily_consumption_clustering, f)
         return daily_consumption_clustering.labels_
-    
+
     def test_daily_consumption(self, clustering_labels):
         anomalous_indices = np.where(clustering_labels==clustering_labels.min())[0]
         quantile = np.quantile([daily_consumption for _, daily_consumption in self.daily_consumption_list],0.95)
@@ -114,35 +132,24 @@ class Operator(OperatorBase):
         if len(self.daily_consumption_list)-1 in anomalous_indices:
             logger.warning(f'Gestern wurde durch {self.device_name} ungewöhnlich viel Strom verbraucht.')
         return [self.daily_consumption_list[i] for i in anomalous_indices_high]
-    
+
     def run(self, data: typing.Dict[str, typing.Any], selector: str, device_id, timestamp: datetime.datetime):
         # Convert to german time and then forget the timezone.
-        timestamp = pd.Timestamp(timestamp).tz_convert("Europe/Berlin").tz_localize(None)
-        data = {'Energy_Consumption': data['Energy_Consumption'], 'Energy_Time': timestamp}
-        timestamp_rounded_to_minute = timestamp.floor('min')
+        timestamp = pd.Timestamp(timestamp).tz_convert(TIMEZONE).tz_localize(None)
         logger.debug('energy: '+str(data['Energy_Consumption'])+'  '+'time: '+str(timestamp))
-        if self.consumption_same_day == []:
-            self.consumption_same_day.append(data)
+        if pd.isna(data['Energy_Consumption']):
+            # Left out, as in the history.
             return
-        elif self.consumption_same_day != []:
-            if data['Energy_Time'].date()==self.consumption_same_day[-1]['Energy_Time'].date():
-                self.consumption_same_day.append(data)
-                return
-            else:
-                self.update_daily_consumption_list()
-                if len(self.daily_consumption_list) >= 24:
-                    epsilon = self.determine_epsilon()
-                    clustering_labels = self.create_clustering(epsilon)
-                    days_with_excessive_consumption = self.test_daily_consumption(clustering_labels)
-                    self.consumption_same_day = [data]                   
-                    if timestamp.date()-pd.Timedelta(1,'days') in list(chain.from_iterable(days_with_excessive_consumption)):
-                        return {'value': f'Am gestrigen Tag wurde übermäßig verbraucht.'} # Excessive daily consumption detected yesterday.
-                    else:
-                        return  # No excessive daily consumtion yesterday.
-                else:
-                    self.consumption_same_day = [data]
-                    return
-                
+        day = self.add_reading(timestamp, float(data['Energy_Consumption']))
+        if day is None or len(self.daily_consumption_list) < MIN_DAYS:
+            return
+        epsilon = self.determine_epsilon()
+        clustering_labels = self.create_clustering(epsilon)
+        days_with_excessive_consumption = self.test_daily_consumption(clustering_labels)
+        if timestamp.date()-pd.Timedelta(1,'days') in [day for day, _ in days_with_excessive_consumption]:
+            return {'value': f'Am gestrigen Tag wurde übermäßig verbraucht.'} # Excessive daily consumption detected yesterday.
+        return  # No excessive daily consumtion yesterday.
+
 from operator_lib.operator_lib import OperatorLib
 if __name__ == "__main__":
     OperatorLib(Operator(), name="excessive-daily-consumption-detection-operator", git_info_file='git_commit')
