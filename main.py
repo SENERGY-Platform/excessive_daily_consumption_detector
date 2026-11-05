@@ -16,7 +16,7 @@
 
 __all__ = ("Operator", )
 
-from operator_lib.util import OperatorBase
+from operator_lib.util import OperatorBase, logger
 import pandas as pd
 import numpy as np
 from sklearn.neighbors import NearestNeighbors
@@ -112,7 +112,7 @@ class Operator(OperatorBase):
         quantile = np.quantile([daily_consumption for _, daily_consumption in self.daily_consumption_list],0.95)
         anomalous_indices_high = [i for i in anomalous_indices if self.daily_consumption_list[i][1] > quantile]
         if len(self.daily_consumption_list)-1 in anomalous_indices:
-            print(f'Gestern wurde durch {self.device_name} ungewöhnlich viel Strom verbraucht.')
+            logger.warning(f'Gestern wurde durch {self.device_name} ungewöhnlich viel Strom verbraucht.')
         return [self.daily_consumption_list[i] for i in anomalous_indices_high]
     
     def run(self, data: typing.Dict[str, typing.Any], selector: str, device_id, timestamp: datetime.datetime):
@@ -120,7 +120,7 @@ class Operator(OperatorBase):
         timestamp = pd.Timestamp(timestamp).tz_convert("Europe/Berlin").tz_localize(None)
         data = {'Energy_Consumption': data['Energy_Consumption'], 'Energy_Time': timestamp}
         timestamp_rounded_to_minute = timestamp.floor('min')
-        print('energy: '+str(data['Energy_Consumption'])+'  '+'time: '+str(timestamp))
+        logger.debug('energy: '+str(data['Energy_Consumption'])+'  '+'time: '+str(timestamp))
         if self.consumption_same_day == []:
             self.consumption_same_day.append(data)
             return
