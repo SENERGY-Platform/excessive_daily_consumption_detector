@@ -56,6 +56,11 @@ class TestJudgement(unittest.TestCase):
         self.assertIsNone(self.judge(ordinary(22) + [20.0]))
         self.assertEqual(EXCESSIVE, self.judge(ordinary(23) + [20.0]))
 
+    def test_does_not_report_the_highest_of_evenly_spread_days(self):
+        # Without an outlier DBSCAN puts every day into a cluster; one of them is no reason for a report. Steps of
+        # 0.125 kWh are exact in binary, so that the consumptions read off the meter lie exactly evenly apart.
+        self.assertIsNone(self.judge([8 + 0.125 * i for i in range(41)]))
+
     def test_does_not_report_a_device_that_consumes_nothing(self):
         # Every day the same: kneed finds no knee.
         self.assertIsNone(self.judge([0.0] * 41))

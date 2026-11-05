@@ -129,10 +129,11 @@ class Operator(OperatorBase):
         return daily_consumption_clustering.labels_
 
     def test_daily_consumption(self, clustering_labels):
-        anomalous_indices = np.where(clustering_labels==clustering_labels.min())[0]
+        # The days that DBSCAN leaves out of every cluster and that lie above the 95 % quantile of all days.
+        anomalous_indices = np.where(clustering_labels==-1)[0]
         quantile = np.quantile([daily_consumption for _, daily_consumption in self.daily_consumption_list],0.95)
         anomalous_indices_high = [i for i in anomalous_indices if self.daily_consumption_list[i][1] > quantile]
-        if len(self.daily_consumption_list)-1 in anomalous_indices:
+        if len(self.daily_consumption_list)-1 in anomalous_indices_high:
             logger.warning(f'Gestern wurde durch {self.device_name} ungewöhnlich viel Strom verbraucht.')
         return [self.daily_consumption_list[i] for i in anomalous_indices_high]
 
