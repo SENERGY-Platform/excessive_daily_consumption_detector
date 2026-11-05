@@ -16,7 +16,6 @@
 
 import datetime
 import unittest
-import warnings
 from unittest import mock
 
 import numpy as np
@@ -42,11 +41,6 @@ def varied(days):
 class TestHistory(unittest.TestCase):
     def setUp(self):
         self.timescale = Timescale()
-        # kneed warns when it finds no knee
-        catcher = warnings.catch_warnings()
-        catcher.__enter__()
-        self.addCleanup(catcher.__exit__, None, None, None)
-        warnings.simplefilter("ignore")
 
     def start(self, reader=None):
         # an operator that reads its history from self.timescale unless another reader is given
@@ -116,7 +110,7 @@ class TestHistory(unittest.TestCase):
         self.assertEqual(self.days(running), self.days(restarted))
 
     def test_judges_the_first_day_after_the_start_with_enough_history(self):
-        readings = meter("2026-06-01", varied(31) + [20.0])
+        readings = meter("2026-06-01", varied(45) + [20.0])
         # The start in the evening of the excessive day.
         self.timescale.write_all(readings[:-20])
         results = self.live(self.start(), readings[-20:] + [(readings[-1][0] + pd.Timedelta(15, "min"), readings[-1][1])])

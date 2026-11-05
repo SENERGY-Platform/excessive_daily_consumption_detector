@@ -21,9 +21,6 @@ from operator_lib.util.config import MissingConfigValueError
 from operator_lib.util.helpers import provide_historic_frames_local, HistoryNeedsRayError
 import pandas as pd
 import numpy as np
-from sklearn.neighbors import NearestNeighbors
-from sklearn.cluster import DBSCAN
-import kneed
 
 import typing
 import datetime
@@ -35,14 +32,72 @@ TIMEZONE = 'Europe/Berlin'
 # A day is compared with the days of this length up to it. As much history is read at every start, and older days
 # are dropped, so that a running operator compares with the same days as one just started.
 HISTORY_LENGTH = pd.Timedelta(90, 'd')
-# The days needed before a day is judged.
-MIN_DAYS = 24
+# A day is excessive above the alarm level of the days before it, as in leakage-detection. The tail of those days
+# begins above this quantile of them; a generalized Pareto distribution is fitted to it, and the level is the
+# consumption that it exceeds with the probability that gives the false alarms per month of the config. Lower than
+# the 90 % of leakage-detection, whose slots are many: 38 days hold a tail of 10 days, and the 89 days before a day 22.
+TAIL_QUANTILE = 0.75
+# A day whose days before have fewer in their tail is not judged.
+MIN_TAIL = 10
+# The shape of the tail is taken no lower than 0, an exponential tail: estimated from a few dozen days it comes out
+# below 0 by chance, which caps the level near the largest day seen. Towards 0.5 its estimate no longer holds.
+MAX_SHAPE = 0.45
+# What the false alarms per month refer to.
+DAYS_PER_MONTH = 30
+# The days are compared to 1 Wh: days of an even consumption differ by the rounding of floating point numbers only,
+# which would make a tail of a few nanowatt hours and an alarm of every larger day.
+DECIMALS = 3
+
+
+def alarm_level(consumptions, probability):
+    # The consumption of a day that the days `consumptions` exceed with `probability`, or None if too few of them lie
+    # in their tail.
+    consumptions = np.round(np.asarray(consumptions, dtype=float), DECIMALS)
+    if len(consumptions) == 0:
+        return None
+    threshold = np.quantile(consumptions, TAIL_QUANTILE)
+    excesses = consumptions[consumptions > threshold] - threshold
+    if len(excesses) < MIN_TAIL:
+        return None
+    shape = tail_shape(excesses)
+    # the mean of the excesses is scale / (1 - shape)
+    scale = excesses.mean() * (1 - shape)
+    # the probability within the tail
+    ratio = probability * len(consumptions) / len(excesses)
+    if shape == 0:
+        return float(threshold - scale * np.log(ratio))
+    return float(threshold + scale / shape * (ratio ** -shape - 1))
+
+
+def tail_shape(excesses):
+    # The shape of a generalized Pareto distribution from the probability weighted moments of the excesses over its
+    # threshold (Hosking and Wallis, 1987), between 0 and MAX_SHAPE.
+    excesses = np.sort(excesses)
+    n = len(excesses)
+    a0 = excesses.mean()
+    a1 = np.sum((n - np.arange(1, n + 1)) / (n - 1) * excesses) / n
+    if a0 - 2 * a1 <= 0:
+        # excesses that are all alike: as light a tail as can be
+        return 0.0
+    return float(np.clip(2 - a0 / (a0 - 2 * a1), 0, MAX_SHAPE))
+
+
+def config_number(value, default):
+    # A flow that sets no value sends an empty string.
+    return default if value == '' else float(value)
 
 
 class CustomConfig(Config):
     device_name: str = ''
+    false_alarms_per_month: float = 1
     # A field of the library, declared again so that flows can set it.
     logger_level: str = "warning"
+
+    def __init__(self, d, **kwargs):
+        super().__init__(d, **kwargs)
+        self.false_alarms_per_month = config_number(self.false_alarms_per_month, 1)
+        if not self.false_alarms_per_month > 0:
+            raise ValueError(f'false_alarms_per_month must be above 0, not {self.false_alarms_per_month}')
 
 # The time of a reading is the time of its Kafka message, so there is no input for it.
 class ConsumptionInputs(Inputs):
@@ -59,6 +114,8 @@ class Operator(OperatorBase):
     def init(self, *args, **kwargs):
         super().init(*args, **kwargs)
         self.device_name = self.config.device_name
+        # The probability with which a day of usual consumption lies above the alarm level of the days before it.
+        self.false_alarm_probability = self.config.false_alarms_per_month / DAYS_PER_MONTH
 
         # (day, consumption) per completed day, oldest first, and the readings of the day in progress. Like everything
         # derived from the readings not kept: rebuilt from the history at every start.
@@ -110,32 +167,14 @@ class Operator(OperatorBase):
             self.daily_consumption_list.pop(0)
         return day
 
-    def determine_epsilon(self):
-        neighbors = NearestNeighbors(n_neighbors=10)
-        neighbors_fit = neighbors.fit(np.array([daily_consumption for _, daily_consumption in self.daily_consumption_list]).reshape(-1,1))
-        distances, _ = neighbors_fit.kneighbors(np.array([daily_consumption for _, daily_consumption in self.daily_consumption_list]).reshape(-1,1))
-        distances = np.sort(distances, axis=0)
-        distances_x = distances[:,1]
-        kneedle = kneed.KneeLocator(np.linspace(0,1,len(distances_x)), distances_x, S=0.9, curve="convex", direction="increasing")
-        epsilon = kneedle.knee_y
-        if not epsilon:
-            # No knee, or one at 0 as when nearly every day consumed the same: DBSCAN needs an epsilon above 0.
-            return 1
-        return epsilon
-
-    def create_clustering(self, epsilon):
-        daily_consumption_clustering = DBSCAN(eps=epsilon, min_samples=10).fit(np.array([daily_consumption
-                                                                     for _, daily_consumption in self.daily_consumption_list]).reshape(-1,1))
-        return daily_consumption_clustering.labels_
-
-    def test_daily_consumption(self, clustering_labels):
-        # The days that DBSCAN leaves out of every cluster and that lie above the 95 % quantile of all days.
-        anomalous_indices = np.where(clustering_labels==-1)[0]
-        quantile = np.quantile([daily_consumption for _, daily_consumption in self.daily_consumption_list],0.95)
-        anomalous_indices_high = [i for i in anomalous_indices if self.daily_consumption_list[i][1] > quantile]
-        if len(self.daily_consumption_list)-1 in anomalous_indices_high:
+    def is_excessive(self):
+        # Whether the last recorded day lies above the alarm level of the days before it; False while they have too few
+        # in their tail.
+        level = alarm_level([consumption for _, consumption in self.daily_consumption_list[:-1]], self.false_alarm_probability)
+        excessive = level is not None and self.daily_consumption_list[-1][1] > level
+        if excessive:
             logger.warning(f'Gestern wurde durch {self.device_name} ungewöhnlich viel Strom verbraucht.')
-        return [self.daily_consumption_list[i] for i in anomalous_indices_high]
+        return excessive
 
     def run(self, data: typing.Dict[str, typing.Any], selector: str, device_id, timestamp: datetime.datetime):
         # Convert to german time and then forget the timezone.
@@ -145,12 +184,9 @@ class Operator(OperatorBase):
             # Left out, as in the history.
             return
         day = self.add_reading(timestamp, float(data['Energy_Consumption']))
-        if day is None or len(self.daily_consumption_list) < MIN_DAYS:
+        if day is None:
             return
-        epsilon = self.determine_epsilon()
-        clustering_labels = self.create_clustering(epsilon)
-        days_with_excessive_consumption = self.test_daily_consumption(clustering_labels)
-        if timestamp.date()-pd.Timedelta(1,'days') in [day for day, _ in days_with_excessive_consumption]:
+        if self.is_excessive() and day == timestamp.date()-pd.Timedelta(1,'days'):
             return {'value': f'Am gestrigen Tag wurde übermäßig verbraucht.'} # Excessive daily consumption detected yesterday.
         return  # No excessive daily consumtion yesterday.
 
