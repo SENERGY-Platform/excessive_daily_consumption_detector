@@ -56,6 +56,14 @@ class TestJudgement(unittest.TestCase):
         self.assertIsNone(self.judge(ordinary(22) + [20.0]))
         self.assertEqual(EXCESSIVE, self.judge(ordinary(23) + [20.0]))
 
+    def test_does_not_report_a_device_that_consumes_nothing(self):
+        # Every day the same: kneed finds no knee.
+        self.assertIsNone(self.judge([0.0] * 41))
+
+    def test_reports_the_first_consumption_of_a_device_that_consumed_nothing_before(self):
+        # kneed finds the knee at 0.
+        self.assertEqual(EXCESSIVE, self.judge([0.0] * 40 + [5.0]))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -118,6 +118,9 @@ class Operator(OperatorBase):
         distances_x = distances[:,1]
         kneedle = kneed.KneeLocator(np.linspace(0,1,len(distances_x)), distances_x, S=0.9, curve="convex", direction="increasing")
         epsilon = kneedle.knee_y
+        if not epsilon:
+            # No knee, or one at 0 as when nearly every day consumed the same: DBSCAN needs an epsilon above 0.
+            return 1
         return epsilon
 
     def create_clustering(self, epsilon):
